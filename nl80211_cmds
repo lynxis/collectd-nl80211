@@ -1,0 +1,15 @@
+NL80211_CMD_GET_SURVEY:
+NL80211_CMD_REGISTER_FRAME:
+WTF is OLBC?
+NL80211_CMD_GET_INTERFACE,
+NL80211_CMD_GET_STATION,
+
+
+NL80211_CMD_GET_KEY,
+
+
+interesting questions about nodes ...
+ type = abgn?
+max supported rates = 11 54 130 300 450 ...
+send rates = statistic about quality...
+power levels ...
