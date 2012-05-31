@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.6)
 
 PROJECT(colnl C)
 
-ADD_DEFINITIONS(-Os -Wall --std=gnu99 -g3)
+ADD_DEFINITIONS(-Wall --std=gnu99 -g)
 include_directories("/usr/include/libnl3/")
 
 add_executable(collectd-nl80211 collectd-nl80211.c)

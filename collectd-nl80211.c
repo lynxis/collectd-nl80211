@@ -8,7 +8,8 @@
 #include <netlink/genl/ctrl.h>
 #include <netlink/msg.h>
 #include <netlink/attr.h>
-
+#include <net/if.h>
+#include <unistd.h>
 
 #include <string.h>
 
@@ -89,7 +90,7 @@ static int cnl80211_config (const char *key, const char *value) {
 
 
 static int nl80211_shutdown() {
-
+    return 0;
 }
 
 static int cnl80211_read_survey() {
@@ -109,12 +110,38 @@ struct parse_nl_cb_args {
 };
 
 static int parse_nl_cb(struct nl_msg *msg, void *arg) {
+    struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
+    char dev[20];
+    int ret = 0;
+
+    struct nlmsghdr *nlh = nlmsg_hdr(msg);
+    struct nlattr *tb[NL80211_ATTR_MAX];
+    struct nlattr *sinfo[NL80211_SURVEY_INFO_MAX + 1];
+
+    static struct nla_policy survey_policy[NL80211_SURVEY_INFO_MAX + 1] = {
+        [NL80211_SURVEY_INFO_FREQUENCY] = { .type = NLA_U32 },
+        [NL80211_SURVEY_INFO_NOISE] = { .type = NLA_U8 },
+    };
+    int foo = genlmsg_attrlen(gnlh, 0);
+    if(foo == 0)
+        return 0;
+    nla_parse(tb, NL80211_ATTR_MAX, genlmsg_attrdata(gnlh, 0),
+          genlmsg_attrlen(gnlh, 0), NULL);
+
+   // if_indextoname(nla_get_u32(tb[NL80211_ATTR_IFINDEX]), dev);
+    ret = nla_parse_nested(sinfo, NL80211_SURVEY_INFO_MAX,
+                     tb[NL80211_ATTR_SURVEY_INFO],
+                     survey_policy);
+
     //struct parse_nl_cb_args *args = (struct parse_nl_cb_args *) arg;
     printf("Callback called\n");
+
+    return 0;
 }
 
 static int parse_err_nl_cb(struct sockaddr_nl *nla, struct nlmsgerr *nlerr, void *arg) {
     printf("CallbackError called");
+    return 0;
 }
 
 int main() {
@@ -141,7 +168,9 @@ int main() {
 		    NLM_F_DUMP, NL80211_CMD_GET_SURVEY, 0);
     //                                                                    ,version = 0
     //genlmsg_put(msg, NL_AUTO_PID, NL_AUTO_SEQ, ctx.family, 0, NLM_F_DUMP, NL80211_CMD_GET_SURVEY, 0);
-    NLA_PUT_U32(msg, NL80211_ATTR_IFINDEX, 0);
+    int devidx = if_nametoindex("wlan0");
+    NLA_PUT_U32(msg, NL80211_ATTR_IFINDEX, devidx);
+
     int err;
     err = nl_send_auto_complete(ctx.sock, msg);
     if (err < 0) {
@@ -153,8 +182,10 @@ int main() {
     nl_socket_set_cb(ctx.sock, cb);
 
     nl_cb_err(cb, NL_CB_VERBOSE, parse_err_nl_cb, &err);
+    //nl_cb_set(cb, NL_CB_FINISH, NL_CB_CUSTOM, parse_nl_cb, &err);
     nl_cb_set(cb, NL_CB_FINISH, NL_CB_CUSTOM, parse_nl_cb, &err);
-    nl_cb_set(cb, NL_CB_ACK, NL_CB_CUSTOM, parse_nl_cb, &err);
+    //nl_cb_set(cb, NL_CB_, NL_CB_CUSTOM, parse_nl_cb, &err);
+
 
 
     // Free message
@@ -165,7 +196,7 @@ int main() {
 
     // Wait for the answer and receive it
     int ret = 0;
-    printf("entering while true \n", ret);
+    printf("entering while true %i \n", ret);
     while(err > 0) {
         ret = nl_recvmsgs_default(ctx.sock);
         printf("ret nl recv %i\n", ret);
