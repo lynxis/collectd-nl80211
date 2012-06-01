@@ -61,6 +61,9 @@ static int cnl80211_init() {
         goto error_handle;
     }
     ctx.family = genl_ctrl_resolve(ctx.sock, "nl80211");
+    if(ctx.family < 0) {
+        goto error_handle;
+    }
 
     return 0;
 
@@ -109,6 +112,16 @@ struct parse_nl_cb_args {
     struct cnl80211_ctx *ctx;
 };
 
+
+static int survey_handler(struct nl_msg *msg, void*arg) {
+    printf("survey handler called\n");
+    return 0;
+}
+
+static int ack_handler(struct nl_msg *msg, void *arg) {
+    printf("Ack received\n");
+    return 0;
+}
 static int parse_nl_cb(struct nl_msg *msg, void *arg) {
     struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
     char dev[20];
@@ -134,7 +147,7 @@ static int parse_nl_cb(struct nl_msg *msg, void *arg) {
                      survey_policy);
 
     //struct parse_nl_cb_args *args = (struct parse_nl_cb_args *) arg;
-    printf("Callback called\n");
+    printf("Callback called %i\n", ret);
 
     return 0;
 }
@@ -146,6 +159,7 @@ static int parse_err_nl_cb(struct sockaddr_nl *nla, struct nlmsgerr *nlerr, void
 
 int main() {
     struct nl_msg *msg;
+    int err;
     
     if(cnl80211_init() == -1) {
         return 6;
@@ -171,24 +185,23 @@ int main() {
     int devidx = if_nametoindex("wlan0");
     NLA_PUT_U32(msg, NL80211_ATTR_IFINDEX, devidx);
 
-    int err;
+
+    nl_socket_set_cb(ctx.sock, cb);
+
     err = nl_send_auto_complete(ctx.sock, msg);
     if (err < 0) {
 	    fprintf(stderr, "send_auto\n");
 	    goto nla_put_failure;
     }
 
-    
-    nl_socket_set_cb(ctx.sock, cb);
-
     nl_cb_err(cb, NL_CB_VERBOSE, parse_err_nl_cb, &err);
-    //nl_cb_set(cb, NL_CB_FINISH, NL_CB_CUSTOM, parse_nl_cb, &err);
     nl_cb_set(cb, NL_CB_FINISH, NL_CB_CUSTOM, parse_nl_cb, &err);
+    nl_cb_set(cb, NL_CB_ACK, NL_CB_CUSTOM, ack_handler, &err);
+    nl_cb_set(cb, NL_CB_VALID, NL_CB_CUSTOM, survey_handler, NULL);
     //nl_cb_set(cb, NL_CB_, NL_CB_CUSTOM, parse_nl_cb, &err);
 
 
 
-    // Free message
 
     // Prepare socket to receive the answer by specifying the callback
 	    // function to be called for valid messages.
@@ -202,6 +215,8 @@ int main() {
         printf("ret nl recv %i\n", ret);
         sleep(1);
     }
+        
+    // Free message
     nlmsg_free(msg);
     nl80211_shutdown();
     return 77;
