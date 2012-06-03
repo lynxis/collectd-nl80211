@@ -11,9 +11,9 @@
 #include <net/if.h>
 #include <unistd.h>
 
-#include <string.h>
+#include <net/ethernet.h>
 
-struct cnl80211_interface;
+#include <string.h>
 
 struct cnl80211_interface {
     char *interface;
@@ -21,11 +21,27 @@ struct cnl80211_interface {
     struct cnl80211_interface *next;
 };
 
+struct cnl80211_station {
+    char mac[ETH_ALEN];
+    int8_t signal_avg;
+    struct cnl80211_station *next;
+};
+
+struct cnl80211_station_interface {
+    char interface[20];
+    int num_stations;
+    struct cnl80211_station *stations;
+    struct cnl80211_station_interface *next;
+};
+
 struct cnl80211_ctx {
     struct nl_sock *sock;
     int family;
     struct cnl80211_interface *interfaces;
+    int stopReceiving; // used to stop receiving loop
+    struct cnl80211_station_interface *station_iface;
 };
+
 
 static struct cnl80211_ctx ctx;
 
@@ -100,6 +116,144 @@ static int cnl80211_read_survey() {
     return 0;
 }
 
+
+
+static int station_dump_handler(struct nl_msg *msg, void *arg) {
+    struct cnl80211_station_interface **all_ifaces = (struct cnl80211_station_interface **) arg;
+    struct cnl80211_station_interface *iface = NULL, *iter = NULL, *prev = NULL;
+    struct cnl80211_station *station = NULL;
+    struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
+    char dev[20], mac[20];
+
+    struct nlmsghdr *nlh = nlmsg_hdr(msg);
+    struct nlattr *tb[NL80211_ATTR_MAX];
+    struct nlattr *sinfo[NL80211_STA_INFO_MAX + 1];
+    static struct nla_policy stats_policy[NL80211_STA_INFO_MAX + 1] = {
+        [NL80211_STA_INFO_INACTIVE_TIME] = { .type = NLA_U32 },
+        [NL80211_STA_INFO_RX_BYTES] = { .type = NLA_U32 },
+        [NL80211_STA_INFO_TX_BYTES] = { .type = NLA_U32 },
+        [NL80211_STA_INFO_RX_PACKETS] = { .type = NLA_U32 },
+        [NL80211_STA_INFO_TX_PACKETS] = { .type = NLA_U32 },
+        [NL80211_STA_INFO_SIGNAL] = { .type = NLA_U8 },
+        [NL80211_STA_INFO_TX_BITRATE] = { .type = NLA_NESTED },
+        [NL80211_STA_INFO_RX_BITRATE] = { .type = NLA_NESTED },
+        [NL80211_STA_INFO_LLID] = { .type = NLA_U16 },
+        [NL80211_STA_INFO_PLID] = { .type = NLA_U16 },
+        [NL80211_STA_INFO_PLINK_STATE] = { .type = NLA_U8 },
+        [NL80211_STA_INFO_TX_RETRIES] = { .type = NLA_U32 },
+        [NL80211_STA_INFO_TX_FAILED] = { .type = NLA_U32 },
+        [NL80211_STA_INFO_STA_FLAGS] = { .minlen = sizeof(struct nl80211_sta_flag_update) },
+        [NL80211_STA_INFO_SIGNAL] = { .type = NLA_NESTED },
+        [NL80211_STA_INFO_SIGNAL_AVG] = { .type = NLA_NESTED },
+    };
+
+    nla_parse(tb, NL80211_ATTR_MAX, genlmsg_attrdata(gnlh, 0),
+          genlmsg_attrlen(gnlh, 0), NULL);
+
+
+
+    if(!tb[NL80211_ATTR_STA_INFO]) {
+        fprintf(stderr, "sta stats missing!\n");
+        return NL_SKIP;
+    }
+
+    if(nla_parse_nested(sinfo, NL80211_STA_INFO_MAX,
+                 tb[NL80211_ATTR_STA_INFO],
+                 stats_policy)) {
+        fprintf(stderr, "failed to parse nested attributes!\n");
+        return NL_SKIP;
+    }
+
+    memcpy(mac, nla_data(tb[NL80211_ATTR_MAC]), ETH_ALEN);
+    if_indextoname(nla_get_u32(tb[NL80211_ATTR_IFINDEX]), dev);
+
+    if(*all_ifaces) {
+        iter = *all_ifaces;
+        struct cnl80211_station_interface *iter = NULL, *prev = NULL;
+        while(iface == NULL) {
+            if(iter == NULL) {
+                iface = (struct cnl80211_station_interface *) calloc(1, sizeof(struct cnl80211_station_interface));
+                prev->next = iface;
+                strncpy(iface->interface, dev, 20);
+            }
+            if(strncmp(iface->interface, dev, 20) == 0) {
+                iface = iter;
+            }
+            prev = iter;
+            iter = iter->next;
+        }
+    } else {
+        iface = (struct cnl80211_station_interface *) calloc(1, sizeof(struct cnl80211_station_interface));
+        strncpy(iface->interface, dev, 20);
+        *all_ifaces = iface;
+    }
+
+    if(iface->stations) {
+        struct cnl80211_station *iter = NULL, *prev = NULL;
+        iter = iface->stations;
+        while(station == NULL) {
+            if(iter == NULL) {
+                station = (struct cnl80211_station *) calloc(1, sizeof(struct cnl80211_station));
+                prev->next = station;
+                strncpy(station->mac, mac, 20);
+                iface->num_stations += 1;
+            }
+            if(strncmp(mac, station->mac, 20) == 0) {
+                station = iter;
+            }
+            prev = iter;
+            iter = iter->next;
+        }
+    } else {
+        station = (struct cnl80211_station *) calloc(1, sizeof(struct cnl80211_station));
+        strncpy(iface->interface, dev, 20);
+        iface->stations = station;
+        iface->num_stations = 1;
+    }
+
+    return NL_SKIP;
+}
+
+static int cnl80211_read_station_dump(const char *iface) {
+    int devidx = if_nametoindex(iface);
+    struct nl_cb *cb = nl_socket_get_cb(ctx.sock);
+    struct nl_msg *msg = nlmsg_alloc();
+    int err = 0;
+
+    if (!msg) {
+	    fprintf(stderr, "failed to allocate netlink message\n");
+	    return 2;
+    }
+
+    nl_cb_set(cb, NL_CB_VALID, NL_CB_CUSTOM, station_dump_handler, &(ctx.station_iface));
+
+    genlmsg_put(msg, 0, 0, ctx.family, 0,
+		    NLM_F_DUMP, NL80211_CMD_GET_STATION, 0);
+
+    NLA_PUT_U32(msg, NL80211_ATTR_IFINDEX, devidx);
+
+
+    err = nl_send_auto_complete(ctx.sock, msg);
+    if (err < 0) {
+	    fprintf(stderr, "send_auto\n");
+        nlmsg_free(msg);
+    }
+
+    nlmsg_free(msg);
+    ctx.stopReceiving = 1;
+
+    while(ctx.stopReceiving) {
+        err = nl_recvmsgs_default(ctx.sock);
+    }
+
+  nla_put_failure:
+    nlmsg_free(msg);
+
+    return NL_SKIP;
+
+}
+
+
 static int cnl80211_read() {
     cnl80211_read_survey();
     // get survey input
@@ -112,16 +266,53 @@ struct parse_nl_cb_args {
     struct cnl80211_ctx *ctx;
 };
 
+static int finish_handler(struct nl_msg *msg, void*arg) {
+    ctx.stopReceiving = 0;
+    return 0;
+}
 
 static int survey_handler(struct nl_msg *msg, void*arg) {
-    printf("survey handler called\n");
-    return 0;
+
+    static struct nla_policy survey_policy[NL80211_SURVEY_INFO_MAX + 1] = {
+        [NL80211_SURVEY_INFO_FREQUENCY] = { .type = NLA_U32 },
+        [NL80211_SURVEY_INFO_NOISE] = { .type = NLA_U8 },
+    };
+
+    struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
+    char dev[20];
+    int ret = 0;
+
+    struct nlmsghdr *nlh = nlmsg_hdr(msg);
+    struct nlattr *tb[NL80211_ATTR_MAX];
+    struct nlattr *sinfo[NL80211_SURVEY_INFO_MAX + 1];
+
+    nla_parse(tb, NL80211_ATTR_MAX, genlmsg_attrdata(gnlh, 0),
+          genlmsg_attrlen(gnlh, 0), NULL);
+
+    if_indextoname(nla_get_u32(tb[NL80211_ATTR_IFINDEX]), dev);
+    ret = nla_parse_nested(sinfo, NL80211_SURVEY_INFO_MAX,
+                     tb[NL80211_ATTR_SURVEY_INFO],
+                     survey_policy);
+    if (!tb[NL80211_ATTR_SURVEY_INFO]) {
+        fprintf(stderr, "survey data missing!\n");
+        return NL_SKIP;
+    }
+
+    if (nla_parse_nested(sinfo, NL80211_SURVEY_INFO_MAX,
+                 tb[NL80211_ATTR_SURVEY_INFO],
+                 survey_policy)) {
+        fprintf(stderr, "failed to parse nested attributes!\n");
+        return NL_SKIP;
+    }
+
+    return NL_SKIP;
 }
 
 static int ack_handler(struct nl_msg *msg, void *arg) {
     printf("Ack received\n");
     return 0;
 }
+
 static int parse_nl_cb(struct nl_msg *msg, void *arg) {
     struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
     char dev[20];
@@ -195,7 +386,7 @@ int main() {
     }
 
     nl_cb_err(cb, NL_CB_VERBOSE, parse_err_nl_cb, &err);
-    nl_cb_set(cb, NL_CB_FINISH, NL_CB_CUSTOM, parse_nl_cb, &err);
+    nl_cb_set(cb, NL_CB_FINISH, NL_CB_CUSTOM, finish_handler, &err);
     nl_cb_set(cb, NL_CB_ACK, NL_CB_CUSTOM, ack_handler, &err);
     nl_cb_set(cb, NL_CB_VALID, NL_CB_CUSTOM, survey_handler, NULL);
     //nl_cb_set(cb, NL_CB_, NL_CB_CUSTOM, parse_nl_cb, &err);
@@ -209,13 +400,7 @@ int main() {
 
     // Wait for the answer and receive it
     int ret = 0;
-    printf("entering while true %i \n", ret);
-    while(err > 0) {
-        ret = nl_recvmsgs_default(ctx.sock);
-        printf("ret nl recv %i\n", ret);
-        sleep(1);
-    }
-        
+    ret = nl_recvmsgs_default(ctx.sock);
     // Free message
     nlmsg_free(msg);
     nl80211_shutdown();
