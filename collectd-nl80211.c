@@ -15,6 +15,11 @@
 
 #include <string.h>
 
+#include "collectd.h"
+#include "common.h"
+#include "plugin.h"
+
+
 struct cnl80211_interface {
     char *interface;
     short ignore;
@@ -40,6 +45,7 @@ struct cnl80211_ctx {
     struct cnl80211_interface *interfaces;
     int stopReceiving; // used to stop receiving loop
     struct cnl80211_station_interface *station_iface;
+    struct nl_cb *cb;
 };
 
 
@@ -56,52 +62,6 @@ static void addInterface(char *iface, short ignore) {
     (*iter)->interface = strdup(iface);
     (*iter)->ignore = ignore;
 }
-
-static int cnl80211_init() {
-    int family;
-    struct nl_msg *msg;
-    int ret = 0;
-    memset(&ctx, 0, sizeof(struct cnl80211_ctx));
-
-    /* init netlink */
-    ctx.sock = nl_socket_alloc();
-    if(!ctx.sock) {
-        // TODO logging
-        printf("Alloc failed\n");
-        goto error_handle;
-    }
-    ret = genl_connect(ctx.sock);
-    if(ret != 0) {
-        // TODO logging
-        printf("connect failed %i\n", ret);
-        goto error_handle;
-    }
-    ctx.family = genl_ctrl_resolve(ctx.sock, "nl80211");
-    if(ctx.family < 0) {
-        goto error_handle;
-    }
-
-    return 0;
-
-  error_handle:
-    nl_socket_free(ctx.sock);
-    return -1;
-} 
-
-static int cnl80211_shutdown() {
-    struct cnl80211_interface *iter = ctx.interfaces;
-    struct cnl80211_interface *old;
-    while(iter != 0) {
-        old = iter;
-        iter = iter->next;
-        free(old);
-    }   
-    if(ctx.sock) {
-        nl_socket_free(ctx.sock);
-    }
-    return 0;
-}
-
 static int cnl80211_config (const char *key, const char *value) {
     addInterface("wlan0", 0);
     return 0;
@@ -116,7 +76,20 @@ static int cnl80211_read_survey() {
     return 0;
 }
 
+static int ack_handler(struct nl_msg *msg, void *arg) {
+    printf("Ack received\n");
+    return 0;
+}
 
+static int parse_err_nl_cb(struct sockaddr_nl *nla, struct nlmsgerr *nlerr, void *arg) {
+    printf("CallbackError called");
+    return 0;
+}
+
+static int finish_handler(struct nl_msg *msg, void*arg) {
+    ctx.stopReceiving = 0;
+    return NL_SKIP;
+}
 
 static int station_dump_handler(struct nl_msg *msg, void *arg) {
     struct cnl80211_station_interface **all_ifaces = (struct cnl80211_station_interface **) arg;
@@ -206,7 +179,7 @@ static int station_dump_handler(struct nl_msg *msg, void *arg) {
         }
     } else {
         station = (struct cnl80211_station *) calloc(1, sizeof(struct cnl80211_station));
-        strncpy(iface->interface, dev, 20);
+        memcpy(station->mac, mac, ETH_ALEN);
         iface->stations = station;
         iface->num_stations = 1;
     }
@@ -216,7 +189,7 @@ static int station_dump_handler(struct nl_msg *msg, void *arg) {
 
 static int cnl80211_read_station_dump(const char *iface) {
     int devidx = if_nametoindex(iface);
-    struct nl_cb *cb = nl_socket_get_cb(ctx.sock);
+    struct nl_cb *cb = ctx.cb;
     struct nl_msg *msg = nlmsg_alloc();
     int err = 0;
 
@@ -246,30 +219,63 @@ static int cnl80211_read_station_dump(const char *iface) {
         err = nl_recvmsgs_default(ctx.sock);
     }
 
+    return NL_SKIP;
+
   nla_put_failure:
-    nlmsg_free(msg);
+//    nlmsg_free(msg);
 
     return NL_SKIP;
 
 }
 
-
+static void clear_sta_ifaces() {
+    struct cnl80211_station_interface *iface, *old_iface;
+    struct cnl80211_station *sta, *old_sta;
+    
+    iface = ctx.station_iface;
+    while(iface != NULL) {
+        sta = iface->stations;
+        while(sta != NULL) {
+            old_sta = sta;
+            sta = sta->next;
+            free(old_sta);
+        }
+        old_iface = iface;
+        iface = iface->next;
+        free(old_iface);
+    }
+}
 static int cnl80211_read() {
-    cnl80211_read_survey();
+
+    struct cnl80211_station_interface *sta_iface = NULL;
+    struct cnl80211_station *sta = NULL;
+
+    clear_sta_ifaces();
+    cnl80211_read_station_dump("wlan0");
+
+    if(sta_iface) {
+        while(sta_iface != NULL) {
+            value_list_t vl = VALUE_LIST_INIT;
+            value_t values;
+            values.absolute = sta_iface->num_stations;
+            sstrncpy(vl.host, hostname_g, sizeof (vl.host));
+            sstrncpy(vl.plugin, "nl80211", sizeof (vl.plugin));
+            sstrncpy(vl.plugin_instance, "", sizeof (vl.plugin_instance));
+            sstrncpy(vl.type, "absolute", sizeof (vl.type));
+            sstrncpy(vl.type_instance, "stations", sizeof (vl.type_instance));
+
+            plugin_dispatch_values(&vl);
+        }
+    }
     // get survey input
     // get stations
     // get 
     return 0;
 }
-
+/*
 struct parse_nl_cb_args {
     struct cnl80211_ctx *ctx;
 };
-
-static int finish_handler(struct nl_msg *msg, void*arg) {
-    ctx.stopReceiving = 0;
-    return 0;
-}
 
 static int survey_handler(struct nl_msg *msg, void*arg) {
 
@@ -307,12 +313,6 @@ static int survey_handler(struct nl_msg *msg, void*arg) {
 
     return NL_SKIP;
 }
-
-static int ack_handler(struct nl_msg *msg, void *arg) {
-    printf("Ack received\n");
-    return 0;
-}
-
 static int parse_nl_cb(struct nl_msg *msg, void *arg) {
     struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
     char dev[20];
@@ -342,16 +342,81 @@ static int parse_nl_cb(struct nl_msg *msg, void *arg) {
 
     return 0;
 }
+*/
 
-static int parse_err_nl_cb(struct sockaddr_nl *nla, struct nlmsgerr *nlerr, void *arg) {
-    printf("CallbackError called");
+static int cnl80211_init() {
+    int family;
+    struct nl_msg *msg;
+    int ret = 0;
+    memset(&ctx, 0, sizeof(struct cnl80211_ctx));
+
+    /* init netlink */
+    ctx.sock = nl_socket_alloc();
+    if(!ctx.sock) {
+        // TODO logging
+        printf("Alloc failed\n");
+        goto error_handle;
+    }
+    ret = genl_connect(ctx.sock);
+    if(ret != 0) {
+        // TODO logging
+        printf("connect failed %i\n", ret);
+        goto error_handle;
+    }
+    ctx.family = genl_ctrl_resolve(ctx.sock, "nl80211");
+    if(ctx.family < 0) {
+        goto error_handle;
+    }
+
+    ctx.cb = nl_cb_alloc(NL_CB_DEFAULT);
+
+    if (!ctx.cb) {
+        fprintf(stderr, "failed to allocate netlink callback\n");
+        goto error_handle;
+    }
+
+    nl_socket_set_cb(ctx.sock, ctx.cb);
+    nl_cb_err(ctx.cb, NL_CB_VERBOSE, parse_err_nl_cb, NULL);
+    nl_cb_set(ctx.cb, NL_CB_FINISH, NL_CB_CUSTOM, finish_handler, NULL);
+    nl_cb_set(ctx.cb, NL_CB_ACK, NL_CB_CUSTOM, ack_handler, NULL);
+
+    return 0;
+
+  error_handle:
+    nl_socket_free(ctx.sock);
+    return -1;
+} 
+
+static int cnl80211_shutdown() {
+    struct cnl80211_interface *iter = ctx.interfaces;
+    struct cnl80211_interface *old;
+    while(iter != 0) {
+        old = iter;
+        iter = iter->next;
+        free(old);
+    }   
+    if(ctx.sock) {
+        nl_socket_free(ctx.sock);
+    }
     return 0;
 }
 
+
+void module_register (void)
+{
+    //plugin_register_config ("apcups", apcups_config, config_keys,
+    //config_keys_num);
+    plugin_register_init("nl80211", cnl80211_init);
+    plugin_register_read ("nl80211", cnl80211_read);
+    plugin_register_shutdown ("nl80211", cnl80211_shutdown);
+} /* void module_register */
+
+
+/*
 int main() {
     struct nl_msg *msg;
     int err;
-    
+
     if(cnl80211_init() == -1) {
         return 6;
     }
@@ -359,43 +424,41 @@ int main() {
 
     msg = nlmsg_alloc();
     if (!msg) {
-	    fprintf(stderr, "failed to allocate netlink message\n");
-	    return 2;
+        fprintf(stderr, "failed to allocate netlink message\n");
+        return 2;
     }
-    struct nl_cb *cb = nl_cb_alloc(NL_CB_DEFAULT);
+    ctx.cb = nl_cb_alloc(NL_CB_DEFAULT);
 
-    if (!cb) {
-	    fprintf(stderr, "failed to allocate netlink callback\n");
-	    goto nla_put_failure;
+    if (!ctx.cb) {
+        fprintf(stderr, "failed to allocate netlink callback\n");
+        goto nla_put_failure;
     }
 
     genlmsg_put(msg, 0, 0, ctx.family, 0,
-		    NLM_F_DUMP, NL80211_CMD_GET_SURVEY, 0);
+            NLM_F_DUMP, NL80211_CMD_GET_SURVEY, 0);
     //                                                                    ,version = 0
     //genlmsg_put(msg, NL_AUTO_PID, NL_AUTO_SEQ, ctx.family, 0, NLM_F_DUMP, NL80211_CMD_GET_SURVEY, 0);
     int devidx = if_nametoindex("wlan0");
     NLA_PUT_U32(msg, NL80211_ATTR_IFINDEX, devidx);
 
 
-    nl_socket_set_cb(ctx.sock, cb);
-
-    err = nl_send_auto_complete(ctx.sock, msg);
-    if (err < 0) {
-	    fprintf(stderr, "send_auto\n");
-	    goto nla_put_failure;
-    }
-
-    nl_cb_err(cb, NL_CB_VERBOSE, parse_err_nl_cb, &err);
-    nl_cb_set(cb, NL_CB_FINISH, NL_CB_CUSTOM, finish_handler, &err);
-    nl_cb_set(cb, NL_CB_ACK, NL_CB_CUSTOM, ack_handler, &err);
-    nl_cb_set(cb, NL_CB_VALID, NL_CB_CUSTOM, survey_handler, NULL);
+//    err = nl_send_auto_complete(ctx.sock, msg);
+//    if (err < 0) {
+//        fprintf(stderr, "send_auto\n");
+//        goto nla_put_failure;
+//    }
+    nl_socket_set_cb(ctx.sock, ctx.cb);
+    nl_cb_err(ctx.cb, NL_CB_VERBOSE, parse_err_nl_cb, &err);
+    nl_cb_set(ctx.cb, NL_CB_FINISH, NL_CB_CUSTOM, finish_handler, &err);
+    nl_cb_set(ctx.cb, NL_CB_ACK, NL_CB_CUSTOM, ack_handler, &err);
+    nl_cb_set(ctx.cb, NL_CB_VALID, NL_CB_CUSTOM, survey_handler, NULL);
     //nl_cb_set(cb, NL_CB_, NL_CB_CUSTOM, parse_nl_cb, &err);
 
-
+    cnl80211_read_station_dump("wlan0");
 
 
     // Prepare socket to receive the answer by specifying the callback
-	    // function to be called for valid messages.
+        // function to be called for valid messages.
     //nl_socket_modify_cb(ctx.sock, NL_CB_VALID, NL_CB_CUSTOM, parse_nl_cb, NULL);
 
     // Wait for the answer and receive it
@@ -411,3 +474,6 @@ int main() {
     nl80211_shutdown();
     return 2;
 }
+*/
+
+
