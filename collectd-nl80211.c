@@ -93,7 +93,7 @@ static int finish_handler(struct nl_msg *msg, void*arg) {
 
 static int station_dump_handler(struct nl_msg *msg, void *arg) {
     struct cnl80211_station_interface **all_ifaces = (struct cnl80211_station_interface **) arg;
-    struct cnl80211_station_interface *iface = NULL, *iter = NULL, *prev = NULL;
+    struct cnl80211_station_interface *iface = NULL;
     struct cnl80211_station *station = NULL;
     struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
     char dev[20], mac[20];
@@ -140,16 +140,16 @@ static int station_dump_handler(struct nl_msg *msg, void *arg) {
     memcpy(mac, nla_data(tb[NL80211_ATTR_MAC]), ETH_ALEN);
     if_indextoname(nla_get_u32(tb[NL80211_ATTR_IFINDEX]), dev);
 
-    if(*all_ifaces) {
-        iter = *all_ifaces;
+    if((*all_ifaces)) {
         struct cnl80211_station_interface *iter = NULL, *prev = NULL;
+        iter = *all_ifaces;
         while(iface == NULL) {
             if(iter == NULL) {
                 iface = (struct cnl80211_station_interface *) calloc(1, sizeof(struct cnl80211_station_interface));
                 prev->next = iface;
                 strncpy(iface->interface, dev, 20);
             }
-            if(strncmp(iface->interface, dev, 20) == 0) {
+            if(strncmp(iter->interface, dev, 20) == 0) {
                 iface = iter;
             }
             prev = iter;
@@ -206,7 +206,7 @@ static int cnl80211_read_station_dump(const char *iface) {
     NLA_PUT_U32(msg, NL80211_ATTR_IFINDEX, devidx);
 
 
-    err = nl_send_auto_complete(ctx.sock, msg);
+    err = nl_send_auto_complete((ctx.sock), msg);
     if (err < 0) {
 	    fprintf(stderr, "send_auto\n");
         nlmsg_free(msg);
@@ -244,6 +244,7 @@ static void clear_sta_ifaces() {
         iface = iface->next;
         free(old_iface);
     }
+    ctx.station_iface = NULL;
 }
 static int cnl80211_read() {
 
@@ -253,18 +254,25 @@ static int cnl80211_read() {
     clear_sta_ifaces();
     cnl80211_read_station_dump("wlan0");
 
+    sta_iface = ctx.station_iface;
+
     if(sta_iface) {
         while(sta_iface != NULL) {
             value_list_t vl = VALUE_LIST_INIT;
-            value_t values;
-            values.absolute = sta_iface->num_stations;
+            value_t values[1];
+
+            values[0].absolute = sta_iface->num_stations;
+
+            vl.values_len = 1;
+            vl.values = values;
             sstrncpy(vl.host, hostname_g, sizeof (vl.host));
             sstrncpy(vl.plugin, "nl80211", sizeof (vl.plugin));
-            sstrncpy(vl.plugin_instance, "", sizeof (vl.plugin_instance));
+            sstrncpy(vl.plugin_instance, sta_iface->interface, sizeof (vl.plugin_instance));
             sstrncpy(vl.type, "absolute", sizeof (vl.type));
             sstrncpy(vl.type_instance, "stations", sizeof (vl.type_instance));
 
             plugin_dispatch_values(&vl);
+            sta_iface = sta_iface->next;
         }
     }
     // get survey input
