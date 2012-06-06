@@ -27,8 +27,18 @@ struct cnl80211_interface {
 };
 
 struct cnl80211_station {
-    char mac[ETH_ALEN];
-    int8_t signal_avg;
+    unsigned char mac[ETH_ALEN];
+    uint32_t rx_bytes;
+    uint32_t tx_bytes;
+    uint32_t rx_pkg;
+    uint32_t tx_pkg;
+    uint32_t tx_retries;
+    uint32_t tx_failed;
+    uint32_t beacon_loss;
+    uint32_t inactive_time;
+    uint32_t connection_time;
+    uint8_t signal;
+    uint16_t mask;
     struct cnl80211_station *next;
 };
 
@@ -183,6 +193,36 @@ static int station_dump_handler(struct nl_msg *msg, void *arg) {
         iface->stations = station;
         iface->num_stations = 1;
     }
+    if (nla_parse_nested(sinfo, NL80211_STA_INFO_MAX,
+                 tb[NL80211_ATTR_STA_INFO],
+                 stats_policy)) {
+        fprintf(stderr, "failed to parse nested attributes!\n");
+        return NL_SKIP;
+    }
+
+    if(sinfo[NL80211_STA_INFO_INACTIVE_TIME])
+        station->inactive_time = nla_get_u32(sinfo[NL80211_STA_INFO_INACTIVE_TIME]);
+    if(sinfo[NL80211_STA_INFO_CONNECTED_TIME])
+        station->connection_time = nla_get_u32(sinfo[NL80211_STA_INFO_CONNECTED_TIME]);
+
+    if(sinfo[NL80211_STA_INFO_RX_BYTES])
+        station->rx_bytes = nla_get_u32(sinfo[NL80211_STA_INFO_INACTIVE_TIME]);
+    if(sinfo[NL80211_STA_INFO_TX_BYTES])
+        station->tx_bytes = nla_get_u32(sinfo[NL80211_STA_INFO_INACTIVE_TIME]);
+    if(sinfo[NL80211_STA_INFO_RX_PACKETS])
+        station->rx_pkg = nla_get_u32(sinfo[NL80211_STA_INFO_RX_PACKETS]);
+    if(sinfo[NL80211_STA_INFO_TX_PACKETS])
+        station->tx_pkg = nla_get_u32(sinfo[NL80211_STA_INFO_TX_PACKETS]);
+
+    if(sinfo[NL80211_STA_INFO_TX_RETRIES])
+        station->tx_retries = nla_get_u32(sinfo[NL80211_STA_INFO_TX_RETRIES]);
+    if(sinfo[NL80211_STA_INFO_TX_FAILED])
+        station->tx_failed = nla_get_u32(sinfo[NL80211_STA_INFO_TX_FAILED]);
+
+    if(sinfo[NL80211_STA_INFO_STA_FLAGS])
+        station->mask = nla_get_u32(sinfo[NL80211_STA_INFO_STA_FLAGS]);
+    if(sinfo[NL80211_STA_INFO_BEACON_LOSS])
+        station->beacon_loss = nla_get_u32(sinfo[NL80211_STA_INFO_BEACON_LOSS]);
 
     return NL_SKIP;
 }
@@ -246,10 +286,29 @@ static void clear_sta_ifaces() {
     }
     ctx.station_iface = NULL;
 }
+
+static void cnl80211_submit(char *type, char *type_inst, char *plugin_instance, int value) {
+    value_t values[1];
+    value_list_t vl = VALUE_LIST_INIT;
+
+    values[0].absolute = (int) value;
+
+    vl.values = values;
+    vl.values_len = 1;
+    sstrncpy (vl.host, hostname_g, sizeof (vl.host));
+    sstrncpy (vl.plugin, "nl80211", sizeof (vl.plugin));
+    sstrncpy (vl.plugin_instance, "", sizeof (vl.plugin_instance));
+    sstrncpy (vl.type, type, sizeof (vl.type));
+    sstrncpy (vl.type_instance, type_inst, sizeof (vl.type_instance));
+
+    plugin_dispatch_values (&vl);
+}
+
 static int cnl80211_read() {
 
     struct cnl80211_station_interface *sta_iface = NULL;
     struct cnl80211_station *sta = NULL;
+    char mac[20];
 
     clear_sta_ifaces();
     cnl80211_read_station_dump("wlan0");
@@ -260,11 +319,13 @@ static int cnl80211_read() {
         while(sta_iface != NULL) {
             value_list_t vl = VALUE_LIST_INIT;
             value_t values[1];
+            char *mac[ETH_ALEN]
 
             values[0].absolute = sta_iface->num_stations;
 
             vl.values_len = 1;
             vl.values = values;
+
             sstrncpy(vl.host, hostname_g, sizeof (vl.host));
             sstrncpy(vl.plugin, "nl80211", sizeof (vl.plugin));
             sstrncpy(vl.plugin_instance, sta_iface->interface, sizeof (vl.plugin_instance));
@@ -272,6 +333,31 @@ static int cnl80211_read() {
             sstrncpy(vl.type_instance, "stations", sizeof (vl.type_instance));
 
             plugin_dispatch_values(&vl);
+
+            while(sta_iface != NULL) {
+                int i = 0;
+                vl = VALUE_LIST_INIT;
+                value_t values[NL80211_STA_INFO_MAX];
+                vl.values_len = sta_iface->num_stations;
+                vl.values = sta_iface->num_stations;
+                sta = sta_iface->stations;
+                while(sta != NULL) {
+                    mac_addr_n2a(mac, sta->mac);
+                    cnl80211_submit("beacon_loss", sta_iface->interface, mac, sta->beacon_loss);
+                    cnl80211_submit("connection_time", sta_iface->interface, mac, sta->connection_time);
+                    cnl80211_submit("inactive_time", sta_iface->interface, mac, sta->inactive_time);
+                    cnl80211_submit("nl80211_mask", sta_iface->interface, mac, sta->mask);
+                    cnl80211_submit("rx_bytes", sta_iface->interface, mac, sta->rx_bytes);
+                    cnl80211_submit("tx_byes", sta_iface->interface, mac, sta->tx_bytes);
+                    cnl80211_submit("rx_pkg", sta_iface->interface, mac, sta->rx_pkg);
+                    cnl80211_submit("tx_pkg", sta_iface->interface, mac, sta->tx_pkg);
+                    cnl80211_submit("tx_retries", sta_iface->interface, mac, sta->tx_retries);
+                    cnl80211_submit("tx_failed", sta_iface->interface, mac, sta->tx_failed);
+                    cnl80211_submit("signal", sta_iface->interface, mac, sta->signal);
+
+            sta = sta->next;
+                }
+            }
             sta_iface = sta_iface->next;
         }
     }
