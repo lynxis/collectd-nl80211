@@ -251,9 +251,9 @@ static int station_dump_handler(struct nl_msg *msg, void *arg) {
         station->connection_time = nla_get_u32(sinfo[NL80211_STA_INFO_CONNECTED_TIME]);
 
     if(sinfo[NL80211_STA_INFO_RX_BYTES])
-        station->rx_bytes = nla_get_u32(sinfo[NL80211_STA_INFO_INACTIVE_TIME]);
+        station->rx_bytes = nla_get_u32(sinfo[NL80211_STA_INFO_RX_BYTES]);
     if(sinfo[NL80211_STA_INFO_TX_BYTES])
-        station->tx_bytes = nla_get_u32(sinfo[NL80211_STA_INFO_INACTIVE_TIME]);
+        station->tx_bytes = nla_get_u32(sinfo[NL80211_STA_INFO_TX_BYTES]);
     if(sinfo[NL80211_STA_INFO_RX_PACKETS])
         station->rx_pkg = nla_get_u32(sinfo[NL80211_STA_INFO_RX_PACKETS]);
     if(sinfo[NL80211_STA_INFO_TX_PACKETS])
