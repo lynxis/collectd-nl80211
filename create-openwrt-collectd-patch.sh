@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 cat build_system.patch > 999-nl80211.patch
 cat >> 999-nl80211.patch  <<EOF
 diff --git a/src/collectd-nl80211.c b/src/collectd-nl80211.c
