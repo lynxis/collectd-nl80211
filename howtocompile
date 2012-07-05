@@ -1,1 +1,0 @@
-gcc -o collectd-nl80211 collectd-nl80211.c -lnl-genl-3 -lnl-3 -I /usr/include/libnl3/
