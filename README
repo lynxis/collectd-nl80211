@@ -10,7 +10,7 @@
 = how to compile under openwrt =
 1 create a patch with `sh create-openwrt-collectd-patch.sh`. it will create 999-nl80211.patch
 2 copy 999-nl80211.patch to $OPENWRT_ROOT/package/feeds/packages/collectd/patches
-3 patch your colletcd/Makefile with collectd-makefile.patch
+3 patch your colletcd/Makefile with openwrt-collectd-makefile.patch
 4 make menuconfig and choose collectd-mod-nl80211
 5 make
 

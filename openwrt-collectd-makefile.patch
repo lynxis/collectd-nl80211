@@ -1,0 +1,41 @@
+Index: utils/collectd/Makefile
+===================================================================
+--- utils/collectd/Makefile	(revision 32574)
++++ utils/collectd/Makefile	(working copy)
+@@ -89,6 +89,7 @@
+ 	mysql \
+ 	netlink \
+ 	network \
++    nl80211 \
+ 	nginx \
+ 	ntpd \
+ 	nut \
+@@ -145,6 +146,8 @@
+   TARGET_CFLAGS += -fsigned-char
+ endif
+ 
++TARGET_CFLAGS+=-g
++
+ # common configure args
+ CONFIGURE_ARGS+= \
+ 	--disable-debug \
+@@ -192,6 +195,11 @@
+   CONFIGURE_ARGS+= --with-libnetlink="$(STAGING_DIR)/usr"
+ endif
+ 
++# exception: mod-nl80211 needs libnl, only buildscripts needs to be modified to use lib-nl-tiny
++ifneq ($(CONFIG_PACKAGE_collectd-mod-nl80211),)
++  CONFIGURE_ARGS+= --with-libnetlink="$(STAGING_DIR)/usr"
++endif
++
+ # exception: mod-modbus needs libmodbus
+ ifneq ($(CONFIG_PACKAGE_collectd-mod-modbus),)
+   CONFIGURE_ARGS+= --with-libmodbus="$(STAGING_DIR)/usr"
+@@ -282,6 +290,7 @@
+ $(eval $(call BuildPlugin,netlink,netlink input,netlink,+PACKAGE_collectd-mod-netlink:ip))
+ $(eval $(call BuildPlugin,network,network input/output,network))
+ $(eval $(call BuildPlugin,nginx,nginx status input,nginx,+PACKAGE_collectd-mod-nginx:libcurl))
++$(eval $(call BuildPlugin,nl80211,nl80211 wifi statistics,nl80211,+PACKAGE_collectd-mod-nl80211:libnl))
+ $(eval $(call BuildPlugin,ntpd,NTP daemon status input,ntpd,))
+ $(eval $(call BuildPlugin,nut,UPS monitoring input,nut,@BROKEN))
+ $(eval $(call BuildPlugin,olsrd,OLSRd status input,olsrd,))
