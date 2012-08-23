@@ -14,4 +14,7 @@
 4 make menuconfig and choose collectd-mod-nl80211
 5 make
 
+= types.db =
+don't forget. you have to append on every node collectd-nl80211 data pass new types.db
+otherwise data won't be transfered
 
