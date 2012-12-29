@@ -399,9 +399,9 @@ static int cnl80211_read() {
             sta = sta_iface->stations;
             while(sta != NULL) {
                 log_debug("within sta");
-                value_t values[11];
+                value_t values[12];
                 value_list_t vl = VALUE_LIST_INIT;
-                vl.values_len = 11;
+                vl.values_len = 12;
                 vl.values = values;
                 mac_addr_n2a(mac, sta->mac);
                 sprintf(identified, "%s_%s", sta_iface, mac);
