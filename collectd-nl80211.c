@@ -48,7 +48,8 @@ struct cnl80211_station {
     uint32_t beacon_loss;
     uint32_t inactive_time;
     uint32_t connection_time;
-    uint8_t signal;
+    int8_t signal;
+    int8_t signal_avg;
     uint16_t mask;
     struct cnl80211_station *next;
 };
@@ -72,8 +73,9 @@ struct cnl80211_ctx {
 
 static struct cnl80211_ctx *ctx = NULL;
 
+int8_t get_signal_from_chain(struct nlattr *attr_list);
 
-static void addInterface(char *iface, short ignore) {
+static void addInterface(const char *iface, short ignore) {
     struct cnl80211_interface **iter = &(ctx->interfaces);
 
     while(*iter != NULL) {
@@ -162,8 +164,12 @@ static int station_dump_handler(struct nl_msg *msg, void *arg) {
         [NL80211_STA_INFO_TX_RETRIES] = { .type = NLA_U32 },
         [NL80211_STA_INFO_TX_FAILED] = { .type = NLA_U32 },
         [NL80211_STA_INFO_STA_FLAGS] = { .minlen = sizeof(struct nl80211_sta_flag_update) },
-        [NL80211_STA_INFO_SIGNAL] = { .type = NLA_NESTED },
-        [NL80211_STA_INFO_SIGNAL_AVG] = { .type = NLA_NESTED },
+#ifdef NL80211_STA_INFO_CHAIN_SIGNAL
+        [NL80211_STA_INFO_CHAIN_SIGNAL] = { .type = NLA_NESTED },
+#endif
+#ifdef NL80211_STA_INFO_CHAIN_SIGNAL_AVG
+        [NL80211_STA_INFO_CHAIN_SIGNAL_AVG] = { .type = NLA_NESTED },
+#endif
     };
 
     nla_parse(tb, NL80211_ATTR_MAX, genlmsg_attrdata(gnlh, 0),
@@ -254,6 +260,7 @@ static int station_dump_handler(struct nl_msg *msg, void *arg) {
         station->rx_bytes = nla_get_u32(sinfo[NL80211_STA_INFO_RX_BYTES]);
     if(sinfo[NL80211_STA_INFO_TX_BYTES])
         station->tx_bytes = nla_get_u32(sinfo[NL80211_STA_INFO_TX_BYTES]);
+
     if(sinfo[NL80211_STA_INFO_RX_PACKETS])
         station->rx_pkg = nla_get_u32(sinfo[NL80211_STA_INFO_RX_PACKETS]);
     if(sinfo[NL80211_STA_INFO_TX_PACKETS])
@@ -268,6 +275,20 @@ static int station_dump_handler(struct nl_msg *msg, void *arg) {
         station->mask = nla_get_u32(sinfo[NL80211_STA_INFO_STA_FLAGS]);
     if(sinfo[NL80211_STA_INFO_BEACON_LOSS])
         station->beacon_loss = nla_get_u32(sinfo[NL80211_STA_INFO_BEACON_LOSS]);
+
+    if(sinfo[NL80211_STA_INFO_SIGNAL])
+        station->signal = (int8_t)nla_get_u8(sinfo[NL80211_STA_INFO_SIGNAL]);
+#ifdef NL80211_STA_INFO_CHAIN_SIGNAL
+    else if(sinfo[NL80211_STA_INFO_CHAIN_SIGNAL])
+        station->signal = get_signal_from_chain(sinfo[NL80211_STA_INFO_CHAIN_SIGNAL]);
+#endif
+
+    if(sinfo[NL80211_STA_INFO_SIGNAL_AVG])
+        station->signal_avg = (int8_t)nla_get_u8(sinfo[NL80211_STA_INFO_SIGNAL_AVG]);
+#ifdef NL80211_STA_INFO_CHAIN_SIGNAL_AVG
+    else if(sinfo[NL80211_STA_INFO_CHAIN_SIGNAL_AVG])
+        station->signal_avg = get_signal_from_chain(sinfo[NL80211_STA_INFO_CHAIN_SIGNAL_AVG]);
+#endif
 
     return NL_SKIP;
 }
@@ -396,6 +417,7 @@ static int cnl80211_read() {
                 values[8].gauge = sta->signal;
                 values[9].gauge = sta->mask;
                 values[10].gauge = sta->beacon_loss;
+                values[11].gauge = sta->signal_avg;
 
                 sstrncpy (vl.host, hostname_g, sizeof (vl.host));
                 sstrncpy (vl.plugin, "nl80211", sizeof (vl.plugin));
@@ -414,7 +436,7 @@ static int cnl80211_read() {
     // get 
     return 0;
 }
-/*
+
 struct parse_nl_cb_args {
     struct cnl80211_ctx *ctx;
 };
@@ -484,7 +506,7 @@ static int parse_nl_cb(struct nl_msg *msg, void *arg) {
 
     return 0;
 }
-*/
+
 
 static int cnl80211_init() {
     int family;
@@ -554,8 +576,27 @@ void module_register (void)
     plugin_register_init("nl80211", cnl80211_init);
     plugin_register_read ("nl80211", cnl80211_read);
     plugin_register_shutdown ("nl80211", cnl80211_shutdown);
-} /* void module_register */
+}
 
+/* 
+ * returns the last signal value of nested signal
+ */
+int8_t get_signal_from_chain(struct nlattr *attr_list)
+{
+    struct nlattr *attr;
+    int rem;
+    int8_t signal = 0;
+
+    if (!attr_list)
+        return signal;
+
+    nla_for_each_nested(attr, attr_list, rem) {
+        /* we want the last argument */
+        signal = (int8_t) nla_get_u8(attr);
+    }
+
+    return signal;
+}
 
 /*
 int main() {
