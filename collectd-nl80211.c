@@ -400,7 +400,7 @@ static int survey_dump_handler(struct nl_msg *msg, void*arg) {
 
     survey->freq = freq;
     if (sinfo[NL80211_SURVEY_INFO_IN_USE])
-        survey->active = 1;
+        survey->inuse = 1;
 	if (sinfo[NL80211_SURVEY_INFO_NOISE])
 		survey->noise = (int8_t)nla_get_u8(sinfo[NL80211_SURVEY_INFO_NOISE]);
 	if (sinfo[NL80211_SURVEY_INFO_CHANNEL_TIME])
