@@ -57,7 +57,8 @@ struct cnl80211_station {
 struct cnl80211_survey_channel {
     uint32_t freq;
     int8_t noise;
-    uint8_t active;
+    int8_t inuse;
+    uint64_t active;
     uint64_t busy;
     uint64_t extbusy;
     uint64_t transmit;
@@ -604,9 +605,9 @@ static int cnl80211_read() {
             while(survey != NULL) {
                 log_debug("send : survey");
 
-                value_t values[6];
+                value_t values[7];
                 value_list_t vl = VALUE_LIST_INIT;
-                vl.values_len = 6;
+                vl.values_len = 7;
                 vl.values = values;
 
                 values[0].gauge = survey->noise;
@@ -615,6 +616,7 @@ static int cnl80211_read() {
                 values[3].gauge = survey->extbusy;
                 values[4].gauge = survey->transmit;
                 values[5].gauge = survey->recv;
+                values[6].gauge = survey->inuse;
                 
                 sprintf(freq, "%u", survey->freq);
                 sstrncpy (vl.host, hostname_g, sizeof (vl.host));
