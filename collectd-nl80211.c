@@ -314,7 +314,7 @@ static int survey_dump_handler(struct nl_msg *msg, void*arg) {
         [NL80211_SURVEY_INFO_FREQUENCY] = { .type = NLA_U32 },
         [NL80211_SURVEY_INFO_NOISE] = { .type = NLA_U8 },
     };
-
+    
     struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
     char dev[20];
     int ret = 0;
@@ -383,7 +383,7 @@ static int survey_dump_handler(struct nl_msg *msg, void*arg) {
                 prev->next = survey;
                 break;
             }
-            log_debug("check mac");
+            log_debug("check freq");
             if(freq == iter->freq) {
                 log_debug("found survey channel");
                 survey = iter;
@@ -397,6 +397,7 @@ static int survey_dump_handler(struct nl_msg *msg, void*arg) {
         iface->survey = survey;
     }
 
+    survey->freq = freq;
     if (sinfo[NL80211_SURVEY_INFO_IN_USE])
         survey->active = 1;
 	if (sinfo[NL80211_SURVEY_INFO_NOISE])
@@ -550,13 +551,14 @@ static int cnl80211_read() {
     struct cnl80211_station *sta = NULL;
     struct cnl80211_survey_channel *survey = NULL;
     char mac[20];
-    char freq[6];
+    char freq[66];
     char identified[60];
 
     clear_sta_ifaces();
     log_debug("asking nl80211 to dump data");
     while(iface != NULL) {
         cnl80211_read_station_dump(iface->interface);
+        cnl80211_read_survey_dump(iface->interface);
         iface = iface->next;
     }
     
@@ -598,7 +600,7 @@ static int cnl80211_read() {
 
                 sta = sta->next;
             }
-            sta_iface = sta_iface->next;
+            survey = sta_iface->survey;
             while(survey != NULL) {
                 log_debug("send : survey");
 
@@ -614,7 +616,7 @@ static int cnl80211_read() {
                 values[4].gauge = survey->transmit;
                 values[5].gauge = survey->recv;
                 
-                sprintf("%i", freq, survey->freq);
+                sprintf(freq, "%u", survey->freq);
                 sstrncpy (vl.host, hostname_g, sizeof (vl.host));
                 sstrncpy (vl.plugin, "nl80211", sizeof (vl.plugin));
                 sstrncpy (vl.plugin_instance, sta_iface->interface, sizeof (vl.plugin_instance));
@@ -624,6 +626,7 @@ static int cnl80211_read() {
 
                 survey = survey->next;
             }
+            sta_iface = sta_iface->next;
         }
     }
     // get survey input
