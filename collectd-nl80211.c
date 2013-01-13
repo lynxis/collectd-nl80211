@@ -499,6 +499,7 @@ static int cnl80211_read_station_dump(const char *iface) {
 static void clear_sta_ifaces() {
     struct cnl80211_station_interface *iface, *old_iface;
     struct cnl80211_station *sta, *old_sta;
+    struct cnl80211_survey_channel *survey, *old_survey;
     
     iface = ctx->station_iface;
     while(iface != NULL) {
@@ -507,6 +508,11 @@ static void clear_sta_ifaces() {
             old_sta = sta;
             sta = sta->next;
             free(old_sta);
+        }
+        while(survey != NULL) {
+            old_survey = survey;
+            survey = survey->next;
+            free(old_survey);
         }
         old_iface = iface;
         iface = iface->next;
