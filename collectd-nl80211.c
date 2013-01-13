@@ -54,11 +54,23 @@ struct cnl80211_station {
     struct cnl80211_station *next;
 };
 
+struct cnl80211_survey_channel {
+    uint32_t freq;
+    int8_t noise;
+    uint8_t active;
+    uint64_t busy;
+    uint64_t extbusy;
+    uint64_t transmit;
+    uint64_t recv;
+    struct cnl80211_survey_channel *next;
+};
+
 struct cnl80211_station_interface {
     char interface[20];
     int num_stations;
     struct cnl80211_station *stations;
     struct cnl80211_station_interface *next;
+    struct cnl80211_survey_channel *survey;
 };
 
 struct cnl80211_ctx {
@@ -293,6 +305,156 @@ static int station_dump_handler(struct nl_msg *msg, void *arg) {
     return NL_SKIP;
 }
 
+static int survey_dump_handler(struct nl_msg *msg, void*arg) {
+    struct cnl80211_station_interface **all_ifaces = (struct cnl80211_station_interface **) arg;
+    struct cnl80211_station_interface *iface = NULL;
+    struct cnl80211_survey_channel *survey = NULL;
+
+    static struct nla_policy survey_policy[NL80211_SURVEY_INFO_MAX + 1] = {
+        [NL80211_SURVEY_INFO_FREQUENCY] = { .type = NLA_U32 },
+        [NL80211_SURVEY_INFO_NOISE] = { .type = NLA_U8 },
+    };
+
+    struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
+    char dev[20];
+    int ret = 0;
+    uint32_t freq;
+
+    struct nlmsghdr *nlh = nlmsg_hdr(msg);
+    struct nlattr *tb[NL80211_ATTR_MAX];
+    struct nlattr *sinfo[NL80211_SURVEY_INFO_MAX + 1];
+
+    nla_parse(tb, NL80211_ATTR_MAX, genlmsg_attrdata(gnlh, 0),
+          genlmsg_attrlen(gnlh, 0), NULL);
+
+    if_indextoname(nla_get_u32(tb[NL80211_ATTR_IFINDEX]), dev);
+    ret = nla_parse_nested(sinfo, NL80211_SURVEY_INFO_MAX,
+                     tb[NL80211_ATTR_SURVEY_INFO],
+                     survey_policy);
+    if (!tb[NL80211_ATTR_SURVEY_INFO]) {
+        fprintf(stderr, "survey data missing!\n");
+        return NL_SKIP;
+    }
+
+    if (nla_parse_nested(sinfo, NL80211_SURVEY_INFO_MAX,
+                 tb[NL80211_ATTR_SURVEY_INFO],
+                 survey_policy)) {
+        fprintf(stderr, "failed to parse nested attributes!\n");
+        return NL_SKIP;
+    }
+
+	if (!sinfo[NL80211_SURVEY_INFO_FREQUENCY]) {
+        fprintf(stderr, "survey dump missing frequency!\n");
+        return NL_SKIP;
+    }
+	freq = nla_get_u32(sinfo[NL80211_SURVEY_INFO_FREQUENCY]);
+
+    // TODO: put this into a function
+    if((*all_ifaces)) {
+        struct cnl80211_station_interface *iter = NULL, *prev = NULL;
+        iter = *all_ifaces;
+        while(iface == NULL) {
+            if(iter == NULL) {
+                iface = (struct cnl80211_station_interface *) calloc(1, sizeof(struct cnl80211_station_interface));
+                prev->next = iface;
+                strncpy(iface->interface, dev, 20);
+                break;
+            }
+            if(strncmp(iter->interface, dev, 20) == 0) {
+                iface = iter;
+            }
+            prev = iter;
+            iter = iter->next;
+        }
+    } else {
+        iface = (struct cnl80211_station_interface *) calloc(1, sizeof(struct cnl80211_station_interface));
+        strncpy(iface->interface, dev, 20);
+        *all_ifaces = iface;
+    }
+
+    if(iface->survey) {
+        struct cnl80211_survey_channel *iter = NULL, *prev = NULL;
+        iter = iface->survey;
+        while(survey == NULL) {
+            log_debug("create survey: while start ");
+            if(iter == NULL) {
+                log_debug("alloc new survey channel");
+                survey = (struct cnl80211_survey_channel *) calloc(1, sizeof(struct cnl80211_survey_channel));
+                prev->next = survey;
+                break;
+            }
+            log_debug("check mac");
+            if(freq == iter->freq) {
+                log_debug("found survey channel");
+                survey = iter;
+            }
+            prev = iter;
+            iter = iter->next;
+        }
+    } else {
+        log_debug("create new survey channel list");
+        survey = (struct cnl80211_survey_channel *) calloc(1, sizeof(struct cnl80211_survey_channel));
+        iface->survey = survey;
+    }
+
+    if (sinfo[NL80211_SURVEY_INFO_IN_USE])
+        survey->active = 1;
+	if (sinfo[NL80211_SURVEY_INFO_NOISE])
+		survey->noise = (int8_t)nla_get_u8(sinfo[NL80211_SURVEY_INFO_NOISE]);
+	if (sinfo[NL80211_SURVEY_INFO_CHANNEL_TIME])
+		survey->active = (unsigned long long)nla_get_u64(sinfo[NL80211_SURVEY_INFO_CHANNEL_TIME]);
+	if (sinfo[NL80211_SURVEY_INFO_CHANNEL_TIME_BUSY])
+		survey->busy = (unsigned long long)nla_get_u64(sinfo[NL80211_SURVEY_INFO_CHANNEL_TIME_BUSY]);
+	if (sinfo[NL80211_SURVEY_INFO_CHANNEL_TIME_EXT_BUSY])
+		survey->extbusy = (unsigned long long)nla_get_u64(sinfo[NL80211_SURVEY_INFO_CHANNEL_TIME_EXT_BUSY]);
+	if (sinfo[NL80211_SURVEY_INFO_CHANNEL_TIME_RX])
+	    survey->recv = (unsigned long long)nla_get_u64(sinfo[NL80211_SURVEY_INFO_CHANNEL_TIME_RX]);
+	if (sinfo[NL80211_SURVEY_INFO_CHANNEL_TIME_TX])
+		survey->transmit = (unsigned long long)nla_get_u64(sinfo[NL80211_SURVEY_INFO_CHANNEL_TIME_TX]);
+
+    return NL_SKIP;
+}
+static int cnl80211_read_survey_dump(const char *iface) {
+    int devidx = if_nametoindex(iface);
+    struct nl_cb *cb = ctx->cb;
+    struct nl_msg *msg = nlmsg_alloc();
+    int err = 0;
+
+    if (!msg) {
+	    fprintf(stderr, "failed to allocate netlink message\n");
+	    return 2;
+    }
+
+    nl_cb_set(cb, NL_CB_VALID, NL_CB_CUSTOM, survey_dump_handler, &(ctx->station_iface));
+
+    genlmsg_put(msg, 0, 0, ctx->family, 0,
+            NLM_F_DUMP, NL80211_CMD_GET_SURVEY, 0);
+
+    NLA_PUT_U32(msg, NL80211_ATTR_IFINDEX, devidx);
+
+
+    err = nl_send_auto_complete((ctx->sock), msg);
+    if (err < 0) {
+	    fprintf(stderr, "send_auto\n");
+        nlmsg_free(msg);
+    }
+
+    nlmsg_free(msg);
+    ctx->stopReceiving = 1;
+
+    while(ctx->stopReceiving) {
+        err = nl_recvmsgs_default(ctx->sock);
+    }
+
+    return NL_SKIP;
+
+  nla_put_failure:
+//    nlmsg_free(msg);
+
+    return NL_SKIP;
+
+}
+
 static int cnl80211_read_station_dump(const char *iface) {
     int devidx = if_nametoindex(iface);
     struct nl_cb *cb = ctx->cb;
@@ -380,7 +542,9 @@ static int cnl80211_read() {
     struct cnl80211_interface *iface = ctx->interfaces;
     struct cnl80211_station_interface *sta_iface = NULL;
     struct cnl80211_station *sta = NULL;
+    struct cnl80211_survey_channel *survey = NULL;
     char mac[20];
+    char freq[6];
     char identified[60];
 
     clear_sta_ifaces();
@@ -429,6 +593,31 @@ static int cnl80211_read() {
                 sta = sta->next;
             }
             sta_iface = sta_iface->next;
+            while(survey != NULL) {
+                log_debug("send : survey");
+
+                value_t values[6];
+                value_list_t vl = VALUE_LIST_INIT;
+                vl.values_len = 6;
+                vl.values = values;
+
+                values[0].gauge = survey->noise;
+                values[1].gauge = survey->active;
+                values[2].gauge = survey->busy;
+                values[3].gauge = survey->extbusy;
+                values[4].gauge = survey->transmit;
+                values[5].gauge = survey->recv;
+                
+                sprintf("%i", freq, survey->freq);
+                sstrncpy (vl.host, hostname_g, sizeof (vl.host));
+                sstrncpy (vl.plugin, "nl80211", sizeof (vl.plugin));
+                sstrncpy (vl.plugin_instance, sta_iface->interface, sizeof (vl.plugin_instance));
+                sstrncpy (vl.type, "nl_survey", sizeof (vl.type));
+                sstrncpy (vl.type_instance, freq, sizeof (vl.type_instance));
+                plugin_dispatch_values (&vl);
+
+                survey = survey->next;
+            }
         }
     }
     // get survey input
@@ -441,42 +630,6 @@ struct parse_nl_cb_args {
     struct cnl80211_ctx *ctx;
 };
 
-static int survey_handler(struct nl_msg *msg, void*arg) {
-
-    static struct nla_policy survey_policy[NL80211_SURVEY_INFO_MAX + 1] = {
-        [NL80211_SURVEY_INFO_FREQUENCY] = { .type = NLA_U32 },
-        [NL80211_SURVEY_INFO_NOISE] = { .type = NLA_U8 },
-    };
-
-    struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
-    char dev[20];
-    int ret = 0;
-
-    struct nlmsghdr *nlh = nlmsg_hdr(msg);
-    struct nlattr *tb[NL80211_ATTR_MAX];
-    struct nlattr *sinfo[NL80211_SURVEY_INFO_MAX + 1];
-
-    nla_parse(tb, NL80211_ATTR_MAX, genlmsg_attrdata(gnlh, 0),
-          genlmsg_attrlen(gnlh, 0), NULL);
-
-    if_indextoname(nla_get_u32(tb[NL80211_ATTR_IFINDEX]), dev);
-    ret = nla_parse_nested(sinfo, NL80211_SURVEY_INFO_MAX,
-                     tb[NL80211_ATTR_SURVEY_INFO],
-                     survey_policy);
-    if (!tb[NL80211_ATTR_SURVEY_INFO]) {
-        fprintf(stderr, "survey data missing!\n");
-        return NL_SKIP;
-    }
-
-    if (nla_parse_nested(sinfo, NL80211_SURVEY_INFO_MAX,
-                 tb[NL80211_ATTR_SURVEY_INFO],
-                 survey_policy)) {
-        fprintf(stderr, "failed to parse nested attributes!\n");
-        return NL_SKIP;
-    }
-
-    return NL_SKIP;
-}
 static int parse_nl_cb(struct nl_msg *msg, void *arg) {
     struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
     char dev[20];
