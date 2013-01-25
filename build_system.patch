@@ -38,8 +38,8 @@ index f106fa1..aabbf4b 100644
 +pkglib_LTLIBRARIES += nl80211.la
 +nl80211_la_SOURCES = collectd-nl80211.c
 +nl80211_la_LDFLAGS = -module -avoid-version
-+nl80211_la_CFLAGS = 
-+nl80211_la_LIBADD = -lnl-genl -lnl
++nl80211_la_CFLAGS = $(AM_CFLAGS) $(BUILD_WITH_LIBNETLINK_CFLAGS)
++nl80211_la_LIBADD = $(BUILD_WITH_LIBNETLINK_LIBS)
 +collectd_LDADD += "-dlopen" nl80211.la
 +collectd_DEPENDENCIES += nl80211.la
 +endif
