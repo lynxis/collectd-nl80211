@@ -286,9 +286,10 @@ static int station_dump_handler(struct nl_msg *msg, void *arg) {
 
     if(sinfo[NL80211_STA_INFO_STA_FLAGS])
         station->mask = nla_get_u32(sinfo[NL80211_STA_INFO_STA_FLAGS]);
+#ifdef NL80211_STA_INFO_BEACON_LOSS
     if(sinfo[NL80211_STA_INFO_BEACON_LOSS])
         station->beacon_loss = nla_get_u32(sinfo[NL80211_STA_INFO_BEACON_LOSS]);
-
+#endif
     if(sinfo[NL80211_STA_INFO_SIGNAL])
         station->signal = (int8_t)nla_get_u8(sinfo[NL80211_STA_INFO_SIGNAL]);
 #ifdef NL80211_STA_INFO_CHAIN_SIGNAL
