@@ -335,19 +335,19 @@ static int survey_dump_handler(struct nl_msg *msg, void*arg) {
                      survey_policy);
     if (!tb[NL80211_ATTR_SURVEY_INFO]) {
         fprintf(stderr, "survey data missing!\n");
-        return NL_SKIP;
+        return NL_STOP;
     }
 
     if (nla_parse_nested(sinfo, NL80211_SURVEY_INFO_MAX,
                  tb[NL80211_ATTR_SURVEY_INFO],
                  survey_policy)) {
         fprintf(stderr, "failed to parse nested attributes!\n");
-        return NL_SKIP;
+        return NL_STOP;
     }
 
 	if (!sinfo[NL80211_SURVEY_INFO_FREQUENCY]) {
         fprintf(stderr, "survey dump missing frequency!\n");
-        return NL_SKIP;
+        return NL_STOP;
     }
 	freq = nla_get_u32(sinfo[NL80211_SURVEY_INFO_FREQUENCY]);
 
@@ -415,8 +415,9 @@ static int survey_dump_handler(struct nl_msg *msg, void*arg) {
 	if (sinfo[NL80211_SURVEY_INFO_CHANNEL_TIME_TX])
 		survey->transmit = (unsigned long long)nla_get_u64(sinfo[NL80211_SURVEY_INFO_CHANNEL_TIME_TX]);
 
-    return NL_SKIP;
+    return NL_OK;
 }
+
 static int cnl80211_read_survey_dump(const char *iface) {
     int devidx = if_nametoindex(iface);
     struct nl_cb *cb = ctx->cb;
@@ -425,7 +426,7 @@ static int cnl80211_read_survey_dump(const char *iface) {
 
     if (!msg) {
 	    fprintf(stderr, "failed to allocate netlink message\n");
-	    return 2;
+        return 2;
     }
 
     nl_cb_set(cb, NL_CB_VALID, NL_CB_CUSTOM, survey_dump_handler, &(ctx->station_iface));
@@ -449,12 +450,13 @@ static int cnl80211_read_survey_dump(const char *iface) {
         err = nl_recvmsgs_default(ctx->sock);
     }
 
-    return NL_SKIP;
+    return 0;
 
   nla_put_failure:
 //    nlmsg_free(msg);
+    nlmsg_free(msg);
 
-    return NL_SKIP;
+    return 0;
 
 }
 
@@ -466,7 +468,7 @@ static int cnl80211_read_station_dump(const char *iface) {
 
     if (!msg) {
 	    fprintf(stderr, "failed to allocate netlink message\n");
-	    return 2;
+        return -2;
     }
 
     nl_cb_set(cb, NL_CB_VALID, NL_CB_CUSTOM, station_dump_handler, &(ctx->station_iface));
@@ -490,12 +492,13 @@ static int cnl80211_read_station_dump(const char *iface) {
         err = nl_recvmsgs_default(ctx->sock);
     }
 
-    return NL_SKIP;
+    return 0;
 
   nla_put_failure:
 //    nlmsg_free(msg);
+    nlmsg_free(msg);
 
-    return NL_SKIP;
+    return -2;
 
 }
 
