@@ -725,6 +725,7 @@ static int cnl80211_shutdown() {
     while(iter != 0) {
         old = iter;
         iter = iter->next;
+        free(old->interface);
         free(old);
     }   
     if(ctx->sock) {
