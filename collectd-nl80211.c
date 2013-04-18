@@ -19,6 +19,7 @@
 #include "common.h"
 #include "plugin.h"
 
+
 #define log_warn(...) WARNING ("nl80211: " __VA_ARGS__)
 #define log_info(...) WARNING ("nl80211: " __VA_ARGS__)
 #define log_debug(...) WARNING ("nl80211: " __VA_ARGS__)
@@ -453,7 +454,7 @@ static int cnl80211_read_survey_dump(const char *iface) {
     return 0;
 
   nla_put_failure:
-//    nlmsg_free(msg);
+    log_warn("netlink failure when trying to send a nl message");
     nlmsg_free(msg);
 
     return 0;
@@ -495,7 +496,7 @@ static int cnl80211_read_station_dump(const char *iface) {
     return 0;
 
   nla_put_failure:
-//    nlmsg_free(msg);
+    log_warn("netlink failure when trying to send a nl message");
     nlmsg_free(msg);
 
     return -2;
