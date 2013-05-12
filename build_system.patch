@@ -14,7 +14,7 @@ index 1cfc2fc..eec4f8f 100644
  AC_PLUGIN([netapp],      [$with_libnetapp],    [NetApp plugin])
  AC_PLUGIN([netlink],     [$with_libnetlink],   [Enhanced Linux network statistics])
  AC_PLUGIN([network],     [yes],                [Network communication plugin])
-+AC_PLUGIN([nl80211],     [$with_libnetlink],   [Linux wireless statistics])
++AC_PLUGIN([nl80211],     [yes],                [Linux wireless statistics])
  AC_PLUGIN([nfs],         [$plugin_nfs],        [NFS statistics])
  AC_PLUGIN([nginx],       [$with_libcurl],      [nginx statistics])
  AC_PLUGIN([notify_desktop], [$with_libnotify], [Desktop notifications])
@@ -38,8 +38,8 @@ index f106fa1..aabbf4b 100644
 +pkglib_LTLIBRARIES += nl80211.la
 +nl80211_la_SOURCES = collectd-nl80211.c
 +nl80211_la_LDFLAGS = -module -avoid-version
-+nl80211_la_CFLAGS = $(AM_CFLAGS) $(BUILD_WITH_LIBNETLINK_CFLAGS)
-+nl80211_la_LIBADD = $(BUILD_WITH_LIBNETLINK_LIBS)
++nl80211_la_CFLAGS = $(AM_CFLAGS) -I $(STAGING_DIR)/usr/include/libnl-tiny/
++nl80211_la_LIBADD = -lnl-tiny
 +collectd_LDADD += "-dlopen" nl80211.la
 +collectd_DEPENDENCIES += nl80211.la
 +endif
