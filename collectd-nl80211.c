@@ -21,8 +21,8 @@
 
 
 #define log_warn(...) WARNING ("nl80211: " __VA_ARGS__)
-#define log_info(...) WARNING ("nl80211: " __VA_ARGS__)
-#define log_debug(...) WARNING ("nl80211: " __VA_ARGS__)
+#define log_info(...) INFO ("nl80211: " __VA_ARGS__)
+#define log_debug(...) DEBUG ("nl80211: " __VA_ARGS__)
 
 static const char *config_keys[] =
 {
