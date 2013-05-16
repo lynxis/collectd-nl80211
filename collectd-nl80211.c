@@ -259,6 +259,7 @@ static int station_dump_handler(struct nl_msg *msg, void *arg) {
     }
     station = &(giface->station_dump.stations[giface->station_dump.num_stations]);
     giface->station_dump.num_stations++;
+    memset(station, '\0', sizeof(struct cnl80211_station));
 
     log_debug("parsing data");
     if (nla_parse_nested(sinfo, NL80211_STA_INFO_MAX,
@@ -357,6 +358,7 @@ static int survey_dump_handler(struct nl_msg *msg, void*arg) {
     giface = get_interface(dev);
     survey =  &(giface->survey_dumps.survey_channel[giface->survey_dumps.channels]);
     giface->survey_dumps.channels++;
+    memset(survey, '\0', sizeof(struct cnl80211_survey_channel));
 
     survey->freq = freq;
     if (sinfo[NL80211_SURVEY_INFO_IN_USE])
