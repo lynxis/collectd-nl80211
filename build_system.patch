@@ -51,9 +51,9 @@ diff --git a/src/types.db b/src/types.db
 index ed27b78..79044d2 100644
 --- a/src/types.db
 +++ b/src/types.db
-@@ -172,3 +172,5 @@
- vs_processes		value:GAUGE:0:65535
- vs_threads		value:GAUGE:0:65535
- stations		value:GAUGE:0:256
+@@ -200,3 +200,5 @@ arc_size		current:GAUGE:0:U, target:GAUG
+ mysql_qcache		hits:COUNTER:0:U, inserts:COUNTER:0:U, not_cached:COUNTER:0:U, lowmem_prunes:COUNTER:0:U, queries_in_cache:GAUGE:0:U
+ mysql_threads		running:GAUGE:0:U, connected:GAUGE:0:U, cached:GAUGE:0:U, created:COUNTER:0:U
+ stations       value:GAUGE:0:256
 +nl_station     connection_time:GAUGE:0:4294967295 inactive_time:GAUGE:0:4294967295 rx_bytes:GAUGE:0:4294967295 tx_bytes:GAUGE:0:4294967295 rx_packages:GAUGE:0:4294967295 tx_packages:GAUGE:0:4294967295 tx_retried:GAUGE:0:4294967295 tx_failed:GAUGE:0:4294967295 signal:GAUGE:-255:255 nl80211_mask:GAUGE:0:4294967295 nl80211_beacon_loss:GAUGE:0:4294967295 signal_avg:GAUGE:-255:255
-+nl_survey      noise:GAUGE:-255:255 active:GAUGE:0:18446744073709551615 busy:GAUGE:0:18446744073709551615 extbusy:GAUGE:0:18446744073709551615  transmit:GAUGE:0:18446744073709551615 receive:GAUGE:0:18446744073709551615 inuse:GAUGE:0:1
++nl_survey      noise:GAUGE:-255:255 active:ABSOLUTE:0:U busy:ABSOLUTE:0:U extbusy:ABSOLUTE:0:U  transmit:ABSOLUTE:0:U receive:ABSOLUTE:0:U inuse:GAUGE:0:1

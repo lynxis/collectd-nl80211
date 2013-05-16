@@ -561,7 +561,7 @@ static int cnl80211_read() {
             sprintf(freq, "%u", survey->freq);
             sstrncpy (vl.host, hostname_g, sizeof (vl.host));
             sstrncpy (vl.plugin, "nl80211", sizeof (vl.plugin));
-            sstrncpy (vl.plugin_instance, iface->interface, sizeof (vl.plugin_instance));
+            sstrncpy (vl.plugin_instance, iface->interface, sizeof(vl.plugin_instance));
             sstrncpy (vl.type, "nl_survey", sizeof (vl.type));
             sstrncpy (vl.type_instance, freq, sizeof (vl.type_instance));
             plugin_dispatch_values (&vl);
