@@ -470,6 +470,7 @@ static void clear_ifaces() {
     while(iface != NULL) {
         iface->station_dump.num_stations = 0;
         iface->survey_dumps.channels = 0;
+        iface = iface->next;
     }
 }
 
